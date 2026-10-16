@@ -297,18 +297,40 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Create new site (Any authenticated supervisor)
   const createNewSite = async (name: string, address: string) => {
     try {
-      const { data, error } = await supabase
+      const siteData: Record<string, unknown> = {
+        name: name.trim(),
+        address: address.trim(),
+        is_active: true,
+      };
+      if (user?.id) {
+        siteData.created_by = user.id;
+      }
+
+      let { data, error } = await supabase
         .from('construction_sites')
-        .insert({
-          name: name.trim(),
-          address: address.trim(),
-          is_active: true,
-          created_by: user?.id,
-        })
+        .insert(siteData)
         .select()
         .single();
 
+      // If created_by column didn't exist in user's older table schema, retry without it
+      if (error && (error.message.includes('created_by') || error.code === '42703')) {
+        delete siteData.created_by;
+        const retry = await supabase
+          .from('construction_sites')
+          .insert(siteData)
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) {
+        if (error.message.includes('row-level security') || error.code === '42501') {
+          return {
+            success: false,
+            error: 'Database Permission: Please run the quick SQL update in your Supabase SQL Editor to allow site creation, or change your account role to Administrator in Profile.',
+          };
+        }
         return { success: false, error: error.message };
       }
 

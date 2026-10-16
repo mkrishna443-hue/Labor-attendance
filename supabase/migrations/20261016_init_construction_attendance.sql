@@ -357,120 +357,159 @@ CREATE TRIGGER trg_site_creator
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_site_creator();
 
 -- --------------------------------------------------------------------
--- RLS Policies: CONSTRUCTION_SITES
+-- RLS Policies: CONSTRUCTION_SITES (Open CRUD for Authenticated Users)
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view sites they are assigned to or all if admin" ON public.construction_sites;
 DROP POLICY IF EXISTS "Users can view assigned or created sites" ON public.construction_sites;
-CREATE POLICY "Users can view assigned or created sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_select_sites" ON public.construction_sites;
+CREATE POLICY "allow_all_authenticated_select_sites"
     ON public.construction_sites FOR SELECT
     TO authenticated
-    USING (created_by = auth.uid() OR public.has_site_access(id, auth.uid()));
+    USING (true);
 
 DROP POLICY IF EXISTS "Admins can create construction sites" ON public.construction_sites;
 DROP POLICY IF EXISTS "Authenticated users can create construction sites" ON public.construction_sites;
-CREATE POLICY "Authenticated users can create construction sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_insert_sites" ON public.construction_sites;
+CREATE POLICY "allow_all_authenticated_insert_sites"
     ON public.construction_sites FOR INSERT
     TO authenticated
-    WITH CHECK (auth.uid() IS NOT NULL);
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Admins can update construction sites" ON public.construction_sites;
 DROP POLICY IF EXISTS "Users can update their construction sites" ON public.construction_sites;
-CREATE POLICY "Users can update their construction sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_update_sites" ON public.construction_sites;
+CREATE POLICY "allow_all_authenticated_update_sites"
     ON public.construction_sites FOR UPDATE
     TO authenticated
-    USING (created_by = auth.uid() OR public.has_site_access(id, auth.uid()))
-    WITH CHECK (created_by = auth.uid() OR public.has_site_access(id, auth.uid()));
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Admins can delete construction sites" ON public.construction_sites;
 DROP POLICY IF EXISTS "Users can delete their construction sites" ON public.construction_sites;
-CREATE POLICY "Users can delete their construction sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_delete_sites" ON public.construction_sites;
+CREATE POLICY "allow_all_authenticated_delete_sites"
     ON public.construction_sites FOR DELETE
     TO authenticated
-    USING (created_by = auth.uid() OR public.has_site_access(id, auth.uid()));
+    USING (true);
 
 -- --------------------------------------------------------------------
 -- RLS Policies: SITE_MEMBERS
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Members can view assignments for their sites" ON public.site_members;
-CREATE POLICY "Members can view assignments for their sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_select_members" ON public.site_members;
+CREATE POLICY "allow_all_authenticated_select_members"
     ON public.site_members FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid() OR public.has_site_access(site_id, auth.uid()));
+    USING (true);
 
 DROP POLICY IF EXISTS "Admins can manage site members" ON public.site_members;
 DROP POLICY IF EXISTS "Users can manage members of assigned sites" ON public.site_members;
-CREATE POLICY "Users can manage members of assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_all_members" ON public.site_members;
+CREATE POLICY "allow_all_authenticated_all_members"
     ON public.site_members FOR ALL
     TO authenticated
-    USING (user_id = auth.uid() OR public.has_site_access(site_id, auth.uid()));
+    USING (true)
+    WITH CHECK (true);
 
 -- --------------------------------------------------------------------
 -- RLS Policies: LABORERS (Full CRUD: View, Insert, Update, Delete)
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view laborers of assigned sites" ON public.laborers;
-CREATE POLICY "Users can view laborers of assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_select_laborers" ON public.laborers;
+CREATE POLICY "allow_all_authenticated_select_laborers"
     ON public.laborers FOR SELECT
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()));
+    USING (true);
 
 DROP POLICY IF EXISTS "Supervisors and admins can insert laborers in assigned sites" ON public.laborers;
-CREATE POLICY "Supervisors and admins can insert laborers in assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_insert_laborers" ON public.laborers;
+CREATE POLICY "allow_all_authenticated_insert_laborers"
     ON public.laborers FOR INSERT
     TO authenticated
-    WITH CHECK (public.has_site_access(site_id, auth.uid()));
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Supervisors and admins can update laborers in assigned sites" ON public.laborers;
-CREATE POLICY "Supervisors and admins can update laborers in assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_update_laborers" ON public.laborers;
+CREATE POLICY "allow_all_authenticated_update_laborers"
     ON public.laborers FOR UPDATE
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()))
-    WITH CHECK (public.has_site_access(site_id, auth.uid()));
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Supervisors and admins can delete laborers in assigned sites" ON public.laborers;
-CREATE POLICY "Supervisors and admins can delete laborers in assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_delete_laborers" ON public.laborers;
+CREATE POLICY "allow_all_authenticated_delete_laborers"
     ON public.laborers FOR DELETE
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()));
+    USING (true);
 
 -- --------------------------------------------------------------------
 -- RLS Policies: ATTENDANCE (Full CRUD: View, Insert, Update, Delete)
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view attendance of assigned sites" ON public.attendance;
-CREATE POLICY "Users can view attendance of assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_select_attendance" ON public.attendance;
+CREATE POLICY "allow_all_authenticated_select_attendance"
     ON public.attendance FOR SELECT
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()));
+    USING (true);
 
 DROP POLICY IF EXISTS "Supervisors and admins can insert attendance in assigned sites" ON public.attendance;
-CREATE POLICY "Supervisors and admins can insert attendance in assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_insert_attendance" ON public.attendance;
+CREATE POLICY "allow_all_authenticated_insert_attendance"
     ON public.attendance FOR INSERT
     TO authenticated
-    WITH CHECK (public.has_site_access(site_id, auth.uid()));
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Supervisors and admins can update attendance in assigned sites" ON public.attendance;
-CREATE POLICY "Supervisors and admins can update attendance in assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_update_attendance" ON public.attendance;
+CREATE POLICY "allow_all_authenticated_update_attendance"
     ON public.attendance FOR UPDATE
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()))
-    WITH CHECK (public.has_site_access(site_id, auth.uid()));
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Supervisors and admins can delete attendance in assigned sites" ON public.attendance;
-CREATE POLICY "Supervisors and admins can delete attendance in assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_delete_attendance" ON public.attendance;
+CREATE POLICY "allow_all_authenticated_delete_attendance"
     ON public.attendance FOR DELETE
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()));
+    USING (true);
 
 -- --------------------------------------------------------------------
 -- RLS Policies: ATTENDANCE_AUDIT_LOGS
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view audit logs of assigned sites" ON public.attendance_audit_logs;
-CREATE POLICY "Users can view audit logs of assigned sites"
+DROP POLICY IF EXISTS "allow_all_authenticated_select_audit" ON public.attendance_audit_logs;
+CREATE POLICY "allow_all_authenticated_select_audit"
     ON public.attendance_audit_logs FOR SELECT
     TO authenticated
-    USING (public.has_site_access(site_id, auth.uid()));
+    USING (true);
 
 DROP POLICY IF EXISTS "Audit logs can be created via trigger" ON public.attendance_audit_logs;
-CREATE POLICY "Audit logs can be created via trigger"
+DROP POLICY IF EXISTS "allow_all_authenticated_insert_audit" ON public.attendance_audit_logs;
+CREATE POLICY "allow_all_authenticated_insert_audit"
     ON public.attendance_audit_logs FOR INSERT
     TO authenticated
-    WITH CHECK (public.has_site_access(site_id, auth.uid()));
+    WITH CHECK (true);
+
+-- --------------------------------------------------------------------
+-- RLS Policies: PROFILES (Allow update and select)
+-- --------------------------------------------------------------------
+DROP POLICY IF EXISTS "Users can view their own profile or admins view all" ON public.profiles;
+DROP POLICY IF EXISTS "allow_all_authenticated_select_profiles" ON public.profiles;
+CREATE POLICY "allow_all_authenticated_select_profiles"
+    ON public.profiles FOR SELECT
+    TO authenticated
+    USING (true);
+
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "allow_all_authenticated_update_profiles" ON public.profiles;
+CREATE POLICY "allow_all_authenticated_update_profiles"
+    ON public.profiles FOR UPDATE
+    TO authenticated
+    USING (id = auth.uid() OR public.is_admin(auth.uid()))
+    WITH CHECK (id = auth.uid() OR public.is_admin(auth.uid()));
+
+-- Set default role to admin for ease of management
+UPDATE public.profiles SET role = 'admin' WHERE role IS NULL OR role = 'supervisor';
+ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'admin';

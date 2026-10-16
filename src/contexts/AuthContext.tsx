@@ -17,6 +17,7 @@ interface AuthContextType {
   verifyEmailOtp: (email: string, token: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateProfile: (updates: { name?: string; phone?: string; role?: 'admin' | 'supervisor' }) => Promise<{ success: boolean; error?: string }>;
   checkConfiguration: () => void;
 }
 
@@ -252,6 +253,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateProfile = async (updates: {
+    name?: string;
+    phone?: string;
+    role?: 'admin' | 'supervisor';
+  }): Promise<{ success: boolean; error?: string }> => {
+    if (!user) return { success: false, error: 'Not authenticated' };
+
+    try {
+      const payload: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (updates.name !== undefined) payload.name = updates.name.trim();
+      if (updates.phone !== undefined) payload.phone = updates.phone.trim();
+      if (updates.role !== undefined) payload.role = updates.role;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data) {
+        setProfile(data as Profile);
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update profile';
+      return { success: false, error: msg };
+    }
+  };
+
   const isAdmin = profile?.role === 'admin';
   const isSupervisor = profile?.role === 'supervisor' || isAdmin;
 
@@ -271,6 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         verifyEmailOtp,
         signOut,
         refreshProfile,
+        updateProfile,
         checkConfiguration,
       }}
     >

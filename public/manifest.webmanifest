@@ -1,0 +1,26 @@
+{
+  "name": "LaborTrack - Construction Attendance",
+  "short_name": "LaborTrack",
+  "description": "Mobile-first construction site labor attendance and wage tracking application",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#0F172A",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48 72x72 96x96 144x144",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["business", "productivity", "utilities"]
+}

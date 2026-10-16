@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Navy Blue Background -->
+  <rect width="512" height="512" rx="104" fill="#0F172A"/>
+  
+  <!-- Subtle border ring -->
+  <rect x="12" y="12" width="488" height="488" rx="92" fill="none" stroke="#334155" stroke-width="8"/>
+  
+  <!-- Construction Hard Hat Symbol in Amber/Gold and White -->
+  <g transform="translate(64, 76)">
+    <!-- Helmet Dome -->
+    <path d="M48 200 C48 90, 140 32, 192 32 C244 32, 336 90, 336 200 Z" fill="#F59E0B" />
+    
+    <!-- Helmet Ridge -->
+    <path d="M168 36 C168 36, 176 32, 192 32 C208 32, 216 36, 216 36 L216 198 L168 198 Z" fill="#D97706" />
+    
+    <!-- Helmet Brim -->
+    <path d="M24 200 C24 192, 32 184, 48 184 L336 184 C352 184, 360 192, 360 200 L372 220 C376 226, 370 234, 360 234 L24 234 C14 234, 8 226, 12 220 Z" fill="#F59E0B" />
+    <path d="M12 224 L372 224 C372 232, 362 238, 350 238 L34 238 C22 238, 12 232, 12 224 Z" fill="#D97706" />
+    
+    <!-- Large Attendance Checkmark Badge -->
+    <circle cx="280" cy="270" r="76" fill="#0F172A" />
+    <circle cx="280" cy="270" r="68" fill="#10B981" />
+    <path d="M250 270 L272 292 L314 246" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

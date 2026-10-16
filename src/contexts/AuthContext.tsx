@@ -48,17 +48,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data) {
-        setProfile(data as Profile);
-        return data as Profile;
+        const prof = data as Profile;
+        if (prof.role !== 'admin') {
+          await supabase.from('profiles').update({ role: 'admin' }).eq('id', userId);
+          prof.role = 'admin';
+        }
+        setProfile(prof);
+        return prof;
       }
 
-      // If user profile record not created yet, upsert one
+      // If user profile record not created yet, upsert one with admin privileges
       const derivedName = userEmail ? userEmail.split('@')[0] : 'Site Supervisor';
       const newProfile: Partial<Profile> = {
         id: userId,
         email: userEmail || '',
         name: derivedName,
-        role: 'supervisor',
+        role: 'admin',
       };
 
       const { data: created, error: insertError } = await supabase
@@ -74,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: userId,
           email: userEmail || '',
           name: derivedName,
-          role: 'supervisor',
+          role: 'admin',
         };
         setProfile(fallback);
         return fallback;

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Calendar,
   ChevronLeft,
@@ -11,6 +11,7 @@ import {
   Save,
   Building2,
   UserPlus,
+  Check,
 } from 'lucide-react';
 import { useSite } from '../../contexts/SiteContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -41,7 +42,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
   } = useSite();
   const { user } = useAuth();
 
-  // Local draft state for attendance statuses, notes, and custom daily wages before save
+  // Local draft state for attendance statuses, notes, and custom daily wages
   const [draftStatuses, setDraftStatuses] = useState<Record<string, AttendanceStatus>>({});
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
   const [draftWages, setDraftWages] = useState<Record<string, number>>({});
@@ -60,8 +61,8 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
   const [editingLaborer, setEditingLaborer] = useState<Laborer | null>(null);
   const [isAddLaborerOpen, setIsAddLaborerOpen] = useState(false);
 
-  // Synchronize draft state when attendanceMap or selectedDate changes
-  React.useEffect(() => {
+  // Synchronize when date changes
+  useEffect(() => {
     const initialStatuses: Record<string, AttendanceStatus> = {};
     const initialNotes: Record<string, string> = {};
     const initialWages: Record<string, number> = {};
@@ -81,7 +82,29 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
     setDraftNotes(initialNotes);
     setDraftWages(initialWages);
     setHasUnsavedChanges(false);
-  }, [attendanceMap, selectedDate, laborers]);
+  }, [selectedDate]);
+
+  // Synchronize initial load from attendanceMap without overwriting active unsaved changes
+  useEffect(() => {
+    const loadedStatuses: Record<string, AttendanceStatus> = {};
+    const loadedNotes: Record<string, string> = {};
+    const loadedWages: Record<string, number> = {};
+
+    laborers.forEach((lab) => {
+      const existing = attendanceMap[lab.id];
+      if (existing) {
+        loadedStatuses[lab.id] = existing.status;
+        loadedWages[lab.id] = Number(existing.wage_amount) || calculateWageForStatus(lab.daily_wage, existing.status);
+        if (existing.notes) {
+          loadedNotes[lab.id] = existing.notes;
+        }
+      }
+    });
+
+    setDraftStatuses((prev) => ({ ...loadedStatuses, ...prev }));
+    setDraftNotes((prev) => ({ ...loadedNotes, ...prev }));
+    setDraftWages((prev) => ({ ...loadedWages, ...prev }));
+  }, [attendanceMap, laborers]);
 
   // Date Navigation
   const changeDateByDays = (days: number) => {
@@ -93,30 +116,95 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
     setSelectedDate(`${y}-${m}-${d}`);
   };
 
-  const handleStatusChange = (laborerId: string, status: AttendanceStatus) => {
+  // Instant 1-Tap Status Change & Auto-Save
+  const handleStatusChange = async (laborerId: string, status: AttendanceStatus) => {
     const lab = laborers.find((l) => l.id === laborerId);
+    if (!lab || !currentSite) return;
+
+    const isTogglingOff = draftStatuses[laborerId] === status;
+    const nextStatus = isTogglingOff ? undefined : status;
+
+    // 1. Immediately update local state so UI updates instantly
     setDraftStatuses((prev) => {
-      // Toggle off if tapping same status
-      if (prev[laborerId] === status) {
-        const next = { ...prev };
+      const next = { ...prev };
+      if (isTogglingOff) {
         delete next[laborerId];
-        return next;
+      } else {
+        next[laborerId] = status;
       }
-      return { ...prev, [laborerId]: status };
+      return next;
     });
 
-    // Reset wage to default for newly selected status
-    if (lab) {
-      setDraftWages((prev) => ({
-        ...prev,
-        [laborerId]: calculateWageForStatus(lab.daily_wage, status),
-      }));
-    }
+    const calculatedWage = nextStatus ? calculateWageForStatus(lab.daily_wage, nextStatus) : 0;
+    const finalWage = draftWages[laborerId] !== undefined && !isTogglingOff ? draftWages[laborerId] : calculatedWage;
 
-    setHasUnsavedChanges(true);
+    setDraftWages((prev) => {
+      const next = { ...prev };
+      if (isTogglingOff) {
+        delete next[laborerId];
+      } else {
+        next[laborerId] = finalWage;
+      }
+      return next;
+    });
+
+    // 2. Auto-save to Supabase or offline queue immediately
+    try {
+      if (isTogglingOff) {
+        await deleteAttendanceRecord(laborerId, selectedDate);
+        onShowToast('info', 'Attendance Unmarked', `Cleared attendance for ${lab.name}`);
+      } else {
+        const record = {
+          site_id: currentSite.id,
+          laborer_id: laborerId,
+          attendance_date: selectedDate,
+          status: nextStatus!,
+          wage_amount: finalWage,
+          notes: draftNotes[laborerId] || '',
+          recorded_by: user?.id,
+        };
+
+        if (!isOnline) {
+          enqueueAttendance([record]);
+          onShowToast('warning', 'Saved to Offline Queue', 'Will sync automatically when online.');
+        } else {
+          const { error } = await supabase.from('attendance').upsert([record], {
+            onConflict: 'laborer_id,attendance_date',
+          });
+
+          if (error) {
+            console.error('Attendance save error:', error);
+            if (error.message.includes('row-level security') || error.code === '42501') {
+              onShowToast(
+                'error',
+                'Permission Error (RLS)',
+                'Please run the SQL update in your Supabase SQL Editor to allow attendance saves.'
+              );
+            } else {
+              onShowToast('error', 'Database Error', error.message);
+            }
+          } else {
+            const statusLabel =
+              status === 'present'
+                ? 'Present (Full Day)'
+                : status === 'half_day'
+                ? 'Half Day (0.5 Wage)'
+                : status === 'absent'
+                ? 'Absent (0 Wage)'
+                : 'Leave Approved';
+
+            onShowToast('success', `${lab.name}: ${statusLabel}`, `Payable: ${formatCurrency(finalWage)}`);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error updating attendance';
+      onShowToast('error', 'Error', msg);
+    }
   };
 
   const handleClearAttendance = async (laborerId: string) => {
+    const lab = laborers.find((l) => l.id === laborerId);
     setDraftStatuses((prev) => {
       const next = { ...prev };
       delete next[laborerId];
@@ -133,43 +221,99 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
       return next;
     });
 
-    // If already in database, delete immediately from Supabase
-    if (attendanceMap[laborerId]) {
-      const res = await deleteAttendanceRecord(laborerId, selectedDate);
-      if (res.success) {
-        onShowToast('info', 'Attendance Cleared', 'Attendance record removed for this date.');
-        await refreshData();
-      } else {
-        onShowToast('error', 'Failed to clear', res.error);
-      }
+    const res = await deleteAttendanceRecord(laborerId, selectedDate);
+    if (res.success) {
+      onShowToast('info', 'Attendance Cleared', `Unmarked ${lab?.name || 'laborer'} for this date.`);
     } else {
-      setHasUnsavedChanges(true);
+      onShowToast('error', 'Failed to clear', res.error);
     }
   };
 
-  const handleWageOverride = (laborerId: string, newWage: number) => {
+  const handleWageOverride = async (laborerId: string, newWage: number) => {
+    const lab = laborers.find((l) => l.id === laborerId);
+    const currentStatus = draftStatuses[laborerId];
+    if (!lab || !currentSite || !currentStatus) return;
+
     setDraftWages((prev) => ({
       ...prev,
       [laborerId]: newWage,
     }));
-    setHasUnsavedChanges(true);
+
+    // Save wage update directly
+    const record = {
+      site_id: currentSite.id,
+      laborer_id: laborerId,
+      attendance_date: selectedDate,
+      status: currentStatus,
+      wage_amount: newWage,
+      notes: draftNotes[laborerId] || '',
+      recorded_by: user?.id,
+    };
+
+    if (isOnline) {
+      await supabase.from('attendance').upsert([record], { onConflict: 'laborer_id,attendance_date' });
+    }
     onShowToast('info', 'Daily wage adjusted', `Wage overridden to ${formatCurrency(newWage)} for this day.`);
   };
 
-  // Quick Action: Mark All Present
-  const handleMarkAllPresent = () => {
-    const updated = { ...draftStatuses };
+  // Quick Action: Mark All Present & Save Immediately
+  const handleMarkAllPresent = async () => {
+    if (!currentSite || laborers.length === 0) return;
+
+    const recordsToSave: any[] = [];
+    const updatedStatuses = { ...draftStatuses };
     const updatedWages = { ...draftWages };
+
     laborers.forEach((lab) => {
-      if (!updated[lab.id]) {
-        updated[lab.id] = 'present';
-        updatedWages[lab.id] = calculateWageForStatus(lab.daily_wage, 'present');
+      if (!updatedStatuses[lab.id]) {
+        updatedStatuses[lab.id] = 'present';
+        const wage = calculateWageForStatus(lab.daily_wage, 'present');
+        updatedWages[lab.id] = wage;
+
+        recordsToSave.push({
+          site_id: currentSite.id,
+          laborer_id: lab.id,
+          attendance_date: selectedDate,
+          status: 'present',
+          wage_amount: wage,
+          notes: draftNotes[lab.id] || '',
+          recorded_by: user?.id,
+        });
       }
     });
-    setDraftStatuses(updated);
+
+    if (recordsToSave.length === 0) {
+      onShowToast('info', 'All workers already marked');
+      return;
+    }
+
+    setDraftStatuses(updatedStatuses);
     setDraftWages(updatedWages);
-    setHasUnsavedChanges(true);
-    onShowToast('info', 'All unmarked laborers marked Present', 'Tap "Save Attendance" below to commit.');
+
+    try {
+      if (!isOnline) {
+        enqueueAttendance(recordsToSave);
+        onShowToast('warning', 'Saved to Offline Queue', `${recordsToSave.length} workers queued.`);
+      } else {
+        const { error } = await supabase.from('attendance').upsert(recordsToSave, {
+          onConflict: 'laborer_id,attendance_date',
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        onShowToast(
+          'success',
+          'All Marked Present',
+          `Successfully recorded attendance for ${recordsToSave.length} laborers.`
+        );
+        await refreshData();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save attendance';
+      onShowToast('error', 'Save Failed', msg);
+    }
   };
 
   // Quick Action: Reset drafts
@@ -190,7 +334,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
     }
   };
 
-  // Save Attendance (Bulk Upsert)
+  // Manual Bulk Save
   const handleSaveAttendance = async () => {
     if (!currentSite || laborers.length === 0 || isSaving) return;
 
@@ -244,34 +388,12 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
 
       setIsSaving(false);
       setHasUnsavedChanges(false);
-      onShowToast('success', 'Attendance Saved Successfully', `Recorded attendance for ${recordsToSave.length} laborers.`);
+      onShowToast('success', 'Attendance Saved', `Recorded attendance for ${recordsToSave.length} laborers.`);
       await refreshData();
     } catch (err: unknown) {
       setIsSaving(false);
-      console.warn('Network or DB error saving attendance, falling back to local queue:', err);
-      const fallbackRecords = Object.entries(draftStatuses).map(([laborerId, status]) => {
-        const laborer = laborers.find((l) => l.id === laborerId);
-        const defaultWage = laborer ? calculateWageForStatus(laborer.daily_wage, status) : 0;
-        const finalWage = draftWages[laborerId] !== undefined ? draftWages[laborerId] : defaultWage;
-
-        return {
-          site_id: currentSite.id,
-          laborer_id: laborerId,
-          attendance_date: selectedDate,
-          status,
-          wage_amount: finalWage,
-          notes: draftNotes[laborerId] || '',
-          recorded_by: user?.id,
-        };
-      });
-
-      enqueueAttendance(fallbackRecords);
-      setHasUnsavedChanges(false);
-      onShowToast(
-        'warning',
-        'Saved to Local Queue',
-        'Network interrupted. Records safely saved locally and will sync when connection stabilizes.'
-      );
+      const msg = err instanceof Error ? err.message : 'Failed to save attendance';
+      onShowToast('error', 'Error Saving Attendance', msg);
     }
   };
 
@@ -316,13 +438,29 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
     setActiveNoteText(draftNotes[laborer.id] || '');
   };
 
-  const handleSaveNote = () => {
-    if (notesLaborer) {
+  const handleSaveNote = async () => {
+    if (notesLaborer && currentSite) {
       setDraftNotes((prev) => ({
         ...prev,
         [notesLaborer.id]: activeNoteText.trim(),
       }));
-      setHasUnsavedChanges(true);
+
+      // If already marked, update note in DB
+      const currentStatus = draftStatuses[notesLaborer.id];
+      if (currentStatus) {
+        const currentWage = draftWages[notesLaborer.id] || calculateWageForStatus(notesLaborer.daily_wage, currentStatus);
+        await supabase.from('attendance').upsert({
+          site_id: currentSite.id,
+          laborer_id: notesLaborer.id,
+          attendance_date: selectedDate,
+          status: currentStatus,
+          wage_amount: currentWage,
+          notes: activeNoteText.trim(),
+          recorded_by: user?.id,
+        }, { onConflict: 'laborer_id,attendance_date' });
+      }
+
+      onShowToast('info', 'Note Saved', `Remark updated for ${notesLaborer.name}`);
     }
     setNotesLaborer(null);
   };
@@ -581,8 +719,9 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
               <p className="text-xs font-bold text-slate-900 leading-tight">
                 {markedCount} of {laborers.length} marked &bull; {formatCurrency(totalDayCost)}
               </p>
-              <p className="text-[11px] text-slate-500">
-                {hasUnsavedChanges ? '⚠️ Unsaved changes' : 'All marks saved in cloud'}
+              <p className="text-[11px] text-emerald-700 flex items-center gap-1 font-semibold mt-0.5">
+                <Check className="w-3 h-3" />
+                <span>1-Tap Auto-Saved</span>
               </p>
             </div>
 
@@ -590,21 +729,17 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpe
               type="button"
               onClick={handleSaveAttendance}
               disabled={isSaving || markedCount === 0}
-              className={`px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 shadow-md transition-all ${
-                hasUnsavedChanges
-                  ? 'bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 ring-2 ring-amber-400/50'
-                  : 'bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              className="px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-xs transition-all bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Saving...</span>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Syncing...</span>
                 </>
               ) : (
                 <>
-                  <Save className="w-4 h-4" />
-                  <span>Save Attendance</span>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Re-Sync All</span>
                 </>
               )}
             </button>

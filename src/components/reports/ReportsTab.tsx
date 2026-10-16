@@ -7,18 +7,26 @@ import {
   IndianRupee,
   Users,
   CheckCircle2,
-  Clock,
-  Filter,
+  Building2,
+  Search,
+  Edit2,
+  ChevronRight,
 } from 'lucide-react';
 import { useSite } from '../../contexts/SiteContext';
 import { supabase } from '../../lib/supabase';
-import { AttendanceRecord, Laborer, LaborCategory } from '../../types';
+import { AttendanceRecord, Laborer, LaborCategory, LABOR_CATEGORIES } from '../../types';
 import { formatCurrency, formatDate, getTodayDateString } from '../../lib/wageCalculator';
 import { downloadCsv } from '../../lib/csvExport';
 import { CategoryBadge } from '../common/Badge';
+import { LaborerDetailModal } from '../laborers/LaborerDetailModal';
+import { LaborerFormModal } from '../laborers/LaborerFormModal';
 
-export const ReportsTab: React.FC = () => {
-  const { currentSite, allLaborers } = useSite();
+interface ReportsTabProps {
+  onOpenSiteManagement?: () => void;
+}
+
+export const ReportsTab: React.FC<ReportsTabProps> = ({ onOpenSiteManagement }) => {
+  const { currentSite, allLaborers, refreshData } = useSite();
 
   // Date range presets
   const today = getTodayDateString();
@@ -33,6 +41,14 @@ export const ReportsTab: React.FC = () => {
   // Loaded attendance records in date range
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTrade, setSelectedTrade] = useState<string>('all');
+
+  // Modals for editing laborer or viewing history
+  const [selectedLaborer, setSelectedLaborer] = useState<Laborer | null>(null);
+  const [editingLaborer, setEditingLaborer] = useState<Laborer | null>(null);
 
   // Handle preset clicks
   const applyPreset = (preset: 'today' | 'yesterday' | 'week' | 'month' | 'custom') => {
@@ -61,7 +77,7 @@ export const ReportsTab: React.FC = () => {
   };
 
   // Fetch records whenever site or date range changes
-  useEffect(() => {
+  const fetchRecords = () => {
     if (!currentSite) return;
 
     setLoading(true);
@@ -80,6 +96,10 @@ export const ReportsTab: React.FC = () => {
         }
         setRecords((data || []) as AttendanceRecord[]);
       });
+  };
+
+  useEffect(() => {
+    fetchRecords();
   }, [currentSite, startDate, endDate]);
 
   // Calculations per laborer
@@ -128,6 +148,22 @@ export const ReportsTab: React.FC = () => {
 
     return Object.values(map).sort((a, b) => b.totalWages - a.totalWages);
   }, [allLaborers, records]);
+
+  // Filtered laborer summaries
+  const filteredSummaries = useMemo(() => {
+    return laborerSummaries.filter(({ laborer }) => {
+      const matchSearch =
+        laborer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (laborer.phone && laborer.phone.includes(searchQuery));
+      if (!matchSearch) return false;
+
+      if (selectedTrade !== 'all' && laborer.category !== selectedTrade) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [laborerSummaries, searchQuery, selectedTrade]);
 
   // Aggregate totals
   const totalCost = laborerSummaries.reduce((acc, curr) => acc + curr.totalWages, 0);
@@ -198,14 +234,38 @@ export const ReportsTab: React.FC = () => {
     window.print();
   };
 
+  // If no site is selected
+  if (!currentSite) {
+    return (
+      <div className="space-y-4 pb-20 pt-6 text-center">
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-xs max-w-md mx-auto">
+          <Building2 className="w-12 h-12 mx-auto text-amber-500 mb-3" />
+          <h3 className="font-bold text-slate-900 text-base mb-1">No Construction Site Selected</h3>
+          <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+            Please select or create a site first to review attendance summaries and wage bill reports.
+          </p>
+          {onOpenSiteManagement && (
+            <button
+              type="button"
+              onClick={onOpenSiteManagement}
+              className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-colors shadow-xs"
+            >
+              + Create or Select Site
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 pb-28 pt-2">
       {/* Top Header & Export Actions */}
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">Attendance &amp; Wage Reports</h2>
+          <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">Attendance &amp; Wage Summary</h2>
           <p className="text-xs text-slate-500">
-            {formatDate(startDate)} &mdash; {formatDate(endDate)}
+            {formatDate(startDate)} &mdash; {formatDate(endDate)} &bull; {currentSite.name}
           </p>
         </div>
 
@@ -260,7 +320,7 @@ export const ReportsTab: React.FC = () => {
           ))}
         </div>
 
-        {/* Date Inputs if Custom */}
+        {/* Date Inputs */}
         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-xs">
           <div>
             <label className="text-[11px] font-semibold text-slate-500 block mb-1">Start Date</label>
@@ -294,7 +354,7 @@ export const ReportsTab: React.FC = () => {
         <div className="bg-slate-900 text-white rounded-xl p-3.5 border border-slate-800 shadow-xs">
           <div className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold mb-1">
             <IndianRupee className="w-3.5 h-3.5" />
-            <span>Total Wage Cost</span>
+            <span>Total Wage Bill</span>
           </div>
           <p className="text-xl sm:text-2xl font-bold text-white tracking-tight">{formatCurrency(totalCost)}</p>
           <span className="text-[11px] text-slate-400 mt-0.5 block">For selected period</span>
@@ -310,7 +370,7 @@ export const ReportsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Category-Wise Breakdown Table */}
+      {/* Category-Wise Breakdown */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-bold text-xs sm:text-sm text-slate-900 uppercase tracking-wider">
@@ -347,37 +407,90 @@ export const ReportsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Detailed Laborer-wise Summary Table */}
+      {/* Detailed Laborer-wise Summary Table with Edit Options */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="font-bold text-xs sm:text-sm text-slate-900 uppercase tracking-wider">
-            Worker-wise Attendance &amp; Payable Wages
-          </h3>
-          <span className="text-xs text-slate-500">{laborerSummaries.length} workers</span>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="font-bold text-xs sm:text-sm text-slate-900 uppercase tracking-wider">
+              Worker-wise Attendance &amp; Payable Wages
+            </h3>
+            <p className="text-[11px] text-slate-400">Tap a worker or edit button to update details &amp; daily wage</p>
+          </div>
+          <span className="text-xs text-slate-500 font-semibold">{filteredSummaries.length} workers</span>
+        </div>
+
+        {/* Search & Filter inside summary */}
+        <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter summary by worker name..."
+              className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+            />
+          </div>
+
+          <select
+            value={selectedTrade}
+            onChange={(e) => setSelectedTrade(e.target.value)}
+            className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700"
+          >
+            <option value="all">All Trades</option>
+            {LABOR_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
         </div>
 
         <div className="divide-y divide-slate-100">
-          {laborerSummaries.map(({ laborer, presentDays, halfDays, absentDays, totalWages, manDays }) => (
-            <div key={laborer.id} className="p-3.5 hover:bg-slate-50 transition-colors text-xs">
+          {filteredSummaries.map(({ laborer, presentDays, halfDays, absentDays, totalWages, manDays }) => (
+            <div
+              key={laborer.id}
+              onClick={() => setSelectedLaborer(laborer)}
+              className="p-3.5 hover:bg-slate-50 transition-colors text-xs cursor-pointer"
+            >
               <div className="flex items-start justify-between gap-2 mb-1.5">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-bold text-slate-900 text-sm">{laborer.name}</span>
                     <CategoryBadge category={laborer.category} size="sm" />
+                    {!laborer.is_active && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.2 bg-slate-200 text-slate-600 rounded">
+                        Inactive
+                      </span>
+                    )}
                   </div>
                   <p className="text-slate-400 text-[11px] mt-0.5">
-                    Rate: {formatCurrency(laborer.daily_wage)}/day &bull; Phone: {laborer.phone || 'N/A'}
+                    Daily Rate: <strong className="text-slate-700">{formatCurrency(laborer.daily_wage)}</strong> &bull; Phone: {laborer.phone || 'N/A'}
                   </p>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <span className="text-sm font-extrabold text-slate-900 block">{formatCurrency(totalWages)}</span>
-                  <span className="text-[10px] font-semibold text-emerald-700">{manDays} man-days</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-right">
+                    <span className="text-sm font-extrabold text-slate-900 block">{formatCurrency(totalWages)}</span>
+                    <span className="text-[10px] font-semibold text-emerald-700">{manDays} man-days</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingLaborer(laborer);
+                    }}
+                    className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors ml-1"
+                    title="Edit laborer details and daily wage"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+
+                  <ChevronRight className="w-4 h-4 text-slate-300" />
                 </div>
               </div>
 
               {/* Attendance Breakdown Pills */}
-              <div className="flex items-center gap-1.5 pt-1 text-[11px]">
+              <div className="flex items-center gap-1.5 pt-1 text-[11px] flex-wrap">
                 <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-semibold border border-emerald-200">
                   {presentDays} Present
                 </span>
@@ -391,7 +504,7 @@ export const ReportsTab: React.FC = () => {
             </div>
           ))}
 
-          {laborerSummaries.length === 0 && (
+          {filteredSummaries.length === 0 && (
             <div className="p-8 text-center text-slate-400 text-xs">
               <Users className="w-8 h-8 mx-auto text-slate-300 mb-2" />
               <p>No laborers recorded for this site yet.</p>
@@ -399,6 +512,32 @@ export const ReportsTab: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Laborer History / Details Modal */}
+      <LaborerDetailModal
+        isOpen={Boolean(selectedLaborer)}
+        onClose={() => setSelectedLaborer(null)}
+        laborer={selectedLaborer}
+        onEdit={(lab) => {
+          setSelectedLaborer(null);
+          setEditingLaborer(lab);
+        }}
+      />
+
+      {/* Laborer Edit Form Modal */}
+      <LaborerFormModal
+        isOpen={Boolean(editingLaborer)}
+        onClose={() => setEditingLaborer(null)}
+        laborerToEdit={editingLaborer}
+        onSaved={async () => {
+          await refreshData();
+          fetchRecords();
+        }}
+        onDeleted={async () => {
+          await refreshData();
+          fetchRecords();
+        }}
+      />
     </div>
   );
 };

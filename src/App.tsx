@@ -80,15 +80,23 @@ const MainApp: React.FC = () => {
           )}
 
           {activeTab === 'attendance' && (
-            <AttendanceTab onShowToast={addToast} />
+            <AttendanceTab
+              onShowToast={addToast}
+              onOpenSiteManagement={() => setIsSiteModalOpen(true)}
+            />
           )}
 
           {activeTab === 'laborers' && (
-            <LaborersTab onShowToast={addToast} />
+            <LaborersTab
+              onShowToast={addToast}
+              onOpenSiteManagement={() => setIsSiteModalOpen(true)}
+            />
           )}
 
           {activeTab === 'reports' && (
-            <ReportsTab />
+            <ReportsTab
+              onOpenSiteManagement={() => setIsSiteModalOpen(true)}
+            />
           )}
         </main>
 

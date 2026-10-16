@@ -87,22 +87,35 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             </div>
           </button>
         ) : (
-          <div className="p-3 bg-slate-800 rounded-xl text-xs text-slate-300 flex items-center justify-between">
+          <div className="p-4 bg-slate-800 rounded-xl text-xs text-slate-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <span className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-400" />
-              Please select or create a site to continue.
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>No site selected or created yet. Create your first site to start tracking!</span>
             </span>
-            {isAdmin && (
-              <button
-                onClick={onOpenSiteManagement}
-                className="bg-amber-500 text-slate-950 px-3 py-1 font-bold rounded-lg text-xs"
-              >
-                Manage Sites
-              </button>
-            )}
+            <button
+              onClick={onOpenSiteManagement}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 font-bold rounded-lg text-xs shrink-0 transition-colors"
+            >
+              + Create / Manage Sites
+            </button>
           </div>
         )}
       </div>
+
+      {currentSite && stats.totalLaborers === 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 flex items-center justify-between gap-2">
+          <div>
+            <h4 className="text-xs font-bold text-amber-900">No laborers added to this site yet</h4>
+            <p className="text-[11px] text-amber-800">Add laborers and set daily wage rates to begin attendance.</p>
+          </div>
+          <button
+            onClick={() => onNavigateTab('laborers')}
+            className="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded-lg text-xs shrink-0"
+          >
+            + Add Laborers
+          </button>
+        </div>
+      )}
 
       {/* KPI 4-Card Grid */}
       <div className="grid grid-cols-2 gap-3">

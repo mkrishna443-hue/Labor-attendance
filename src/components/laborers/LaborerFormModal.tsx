@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Phone, Briefcase, IndianRupee, FileText, Check, AlertCircle } from 'lucide-react';
+import { User, Phone, Briefcase, IndianRupee, FileText, Check, AlertCircle, Trash2 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Laborer, LaborCategory, LABOR_CATEGORIES } from '../../types';
 import { supabase } from '../../lib/supabase';
@@ -10,15 +10,19 @@ interface LaborerFormModalProps {
   onClose: () => void;
   laborerToEdit?: Laborer | null;
   onSaved: () => void;
+  onDeleted?: () => void;
 }
+
+const COMMON_WAGES = [400, 500, 600, 700, 750, 800, 900, 1000];
 
 export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
   isOpen,
   onClose,
   laborerToEdit,
   onSaved,
+  onDeleted,
 }) => {
-  const { currentSite } = useSite();
+  const { currentSite, deleteLaborer } = useSite();
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -27,6 +31,7 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
   const [isActive, setIsActive] = useState<boolean>(true);
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,7 +56,7 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSite) {
-      setErrorMsg('No site selected');
+      setErrorMsg('No site selected. Please create or select a site first.');
       return;
     }
 
@@ -105,6 +110,25 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
     }
   };
 
+  const handleDelete = async () => {
+    if (!laborerToEdit) return;
+    const confirmed = confirm(
+      `Permanently delete "${laborerToEdit.name}"?\nAll attendance records for this laborer will be removed.`
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    const res = await deleteLaborer(laborerToEdit.id);
+    setIsDeleting(false);
+
+    if (res.success) {
+      if (onDeleted) onDeleted();
+      onClose();
+    } else {
+      setErrorMsg(res.error || 'Failed to delete laborer');
+    }
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -132,6 +156,7 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Ramesh Kumar"
             required
+            autoFocus
             className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
           />
         </div>
@@ -160,7 +185,7 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as LaborCategory)}
-            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
+            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white font-medium"
           >
             {LABOR_CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>
@@ -172,10 +197,14 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
 
         {/* Daily Wage in INR */}
         <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-            <IndianRupee className="w-3.5 h-3.5 text-slate-500" />
-            Daily Wage Rate (₹) *
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <IndianRupee className="w-3.5 h-3.5 text-slate-500" />
+              Daily Wage Rate (₹) *
+            </label>
+            <span className="text-xs font-bold text-slate-900">₹{dailyWage || 0}/day</span>
+          </div>
+
           <input
             type="number"
             min="0"
@@ -184,11 +213,27 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
             onChange={(e) => setDailyWage(e.target.value)}
             placeholder="500"
             required
-            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
+            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-base text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white"
           />
-          <p className="text-[11px] text-slate-500 mt-1">
-            Amount paid for full-day attendance (half-day pays 50%).
-          </p>
+
+          {/* Preset Wage Chips */}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <span className="text-[11px] text-slate-400 self-center mr-1">Presets:</span>
+            {COMMON_WAGES.map((wage) => (
+              <button
+                key={wage}
+                type="button"
+                onClick={() => setDailyWage(String(wage))}
+                className={`px-2 py-0.5 rounded text-xs font-semibold border transition-colors ${
+                  dailyWage === String(wage)
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                ₹{wage}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Active Status Checkbox */}
@@ -196,7 +241,7 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
           <div>
             <span className="font-semibold text-xs text-slate-900 block">Active Status</span>
             <span className="text-[11px] text-slate-500 block">
-              Inactive laborers do not appear in daily attendance but retain full history.
+              Inactive laborers are hidden from daily attendance but retain history.
             </span>
           </div>
 
@@ -226,23 +271,39 @@ export const LaborerFormModal: React.FC<LaborerFormModalProps> = ({
           />
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="px-5 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-          >
-            <Check className="w-4 h-4" />
-            <span>{laborerToEdit ? 'Save Changes' : 'Register Laborer'}</span>
-          </button>
+        {/* Action Buttons: Delete + Cancel + Save */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+          {laborerToEdit ? (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
+            </button>
+          ) : (
+            <div />
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isLoading || isDeleting}
+              className="px-5 py-2 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+            >
+              <Check className="w-4 h-4" />
+              <span>{laborerToEdit ? 'Save Changes' : 'Register Laborer'}</span>
+            </button>
+          </div>
         </div>
       </form>
     </Modal>

@@ -32,6 +32,11 @@ interface SiteContextType {
   refreshData: () => Promise<void>;
   syncNow: () => Promise<{ successCount: number; failedCount: number }>;
   createNewSite: (name: string, address: string) => Promise<{ success: boolean; error?: string; site?: ConstructionSite }>;
+  updateSite: (siteId: string, name: string, address: string) => Promise<{ success: boolean; error?: string }>;
+  deleteSite: (siteId: string) => Promise<{ success: boolean; error?: string }>;
+  deleteLaborer: (laborerId: string) => Promise<{ success: boolean; error?: string }>;
+  updateLaborerWage: (laborerId: string, newWage: number) => Promise<{ success: boolean; error?: string }>;
+  deleteAttendanceRecord: (laborerId: string, date: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const SiteContext = createContext<SiteContextType | undefined>(undefined);
@@ -39,7 +44,7 @@ const SiteContext = createContext<SiteContextType | undefined>(undefined);
 const CURRENT_SITE_KEY = 'labortrack_current_site_id';
 
 export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const [sites, setSites] = useState<ConstructionSite[]>([]);
   const [currentSite, setCurrentSiteState] = useState<ConstructionSite | null>(null);
   const [laborers, setLaborers] = useState<Laborer[]>([]);
@@ -55,7 +60,6 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      // Auto sync when coming back online
       if (user) {
         syncNow();
       }
@@ -65,7 +69,6 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Subscribe to pending queue changes
     const unsubscribeQueue = subscribePendingQueue((q) => {
       setPendingQueue(q);
     });
@@ -95,10 +98,12 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      let query = supabase.from('construction_sites').select('*').eq('is_active', true);
+      const { data, error } = await supabase
+        .from('construction_sites')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
 
-      // If not admin, RLS handles filtering through site_members automatically!
-      const { data, error } = await query.order('name');
       if (error) {
         console.warn('Error fetching sites:', error.message);
         return [];
@@ -107,7 +112,6 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const siteList = (data as ConstructionSite[]) || [];
       setSites(siteList);
 
-      // Preserve previously selected site or select first
       const savedSiteId = localStorage.getItem(CURRENT_SITE_KEY);
       const matched = siteList.find((s) => s.id === savedSiteId);
       if (matched) {
@@ -167,7 +171,7 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
         map[rec.laborer_id] = rec;
       });
 
-      // Overlay any pending offline records for this date
+      // Overlay pending offline records
       const queue = getPendingQueue();
       queue.forEach((q) => {
         if (q.site_id === siteId && q.attendance_date === date) {
@@ -205,24 +209,30 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fetchLaborers(activeSite.id),
         fetchAttendance(activeSite.id, selectedDate),
       ]);
+    } else {
+      setLaborers([]);
+      setAllLaborers([]);
+      setAttendanceMap({});
     }
     setIsLoading(false);
   }, [user, currentSite, selectedDate, fetchSites, fetchLaborers, fetchAttendance]);
 
-  // Initial load when user changes
   useEffect(() => {
     refreshData();
   }, [user, refreshData]);
 
-  // Load laborers and attendance when current site or selected date changes
   useEffect(() => {
     if (currentSite) {
       fetchLaborers(currentSite.id);
       fetchAttendance(currentSite.id, selectedDate);
+    } else {
+      setLaborers([]);
+      setAllLaborers([]);
+      setAttendanceMap({});
     }
   }, [currentSite, selectedDate, fetchLaborers, fetchAttendance]);
 
-  // Calculate statistics for the current site and selected date
+  // Statistics calculation
   const stats: SiteStats = useMemo(() => {
     const totalLaborers = allLaborers.length;
     const activeLaborers = laborers.length;
@@ -267,7 +277,7 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [allLaborers, laborers, attendanceMap]);
 
-  // Manual or automatic sync action
+  // Sync action
   const syncNow = async (): Promise<{ successCount: number; failedCount: number }> => {
     if (isSyncing || !isOnline) {
       return { successCount: 0, failedCount: 0 };
@@ -284,11 +294,8 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Create new site (admins)
+  // Create new site (Any authenticated supervisor)
   const createNewSite = async (name: string, address: string) => {
-    if (!isAdmin) {
-      return { success: false, error: 'Only administrators can create sites.' };
-    }
     try {
       const { data, error } = await supabase
         .from('construction_sites')
@@ -296,6 +303,7 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: name.trim(),
           address: address.trim(),
           is_active: true,
+          created_by: user?.id,
         })
         .select()
         .single();
@@ -305,11 +313,143 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const newSite = data as ConstructionSite;
+
+      // Assign creator to site_members
+      if (user?.id) {
+        await supabase.from('site_members').upsert({
+          site_id: newSite.id,
+          user_id: user.id,
+          role: 'admin',
+        }, { onConflict: 'site_id,user_id' });
+      }
+
       setSites((prev) => [...prev, newSite]);
       setCurrentSite(newSite);
       return { success: true, site: newSite };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create site';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Edit site details
+  const updateSite = async (siteId: string, name: string, address: string) => {
+    try {
+      const { error } = await supabase
+        .from('construction_sites')
+        .update({
+          name: name.trim(),
+          address: address.trim(),
+        })
+        .eq('id', siteId);
+
+      if (error) throw error;
+
+      setSites((prev) =>
+        prev.map((s) => (s.id === siteId ? { ...s, name: name.trim(), address: address.trim() } : s))
+      );
+      if (currentSite?.id === siteId) {
+        setCurrentSiteState({ ...currentSite, name: name.trim(), address: address.trim() });
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update site';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Delete site
+  const deleteSite = async (siteId: string) => {
+    try {
+      const { error } = await supabase
+        .from('construction_sites')
+        .delete()
+        .eq('id', siteId);
+
+      if (error) throw error;
+
+      const remaining = sites.filter((s) => s.id !== siteId);
+      setSites(remaining);
+      if (currentSite?.id === siteId) {
+        const next = remaining.length > 0 ? remaining[0] : null;
+        setCurrentSite(next);
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete site';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Delete laborer
+  const deleteLaborer = async (laborerId: string) => {
+    try {
+      const { error } = await supabase
+        .from('laborers')
+        .delete()
+        .eq('id', laborerId);
+
+      if (error) throw error;
+
+      setAllLaborers((prev) => prev.filter((l) => l.id !== laborerId));
+      setLaborers((prev) => prev.filter((l) => l.id !== laborerId));
+      setAttendanceMap((prev) => {
+        const next = { ...prev };
+        delete next[laborerId];
+        return next;
+      });
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete laborer';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Quick update laborer wage
+  const updateLaborerWage = async (laborerId: string, newWage: number) => {
+    try {
+      const { error } = await supabase
+        .from('laborers')
+        .update({ daily_wage: newWage })
+        .eq('id', laborerId);
+
+      if (error) throw error;
+
+      setAllLaborers((prev) =>
+        prev.map((l) => (l.id === laborerId ? { ...l, daily_wage: newWage } : l))
+      );
+      setLaborers((prev) =>
+        prev.map((l) => (l.id === laborerId ? { ...l, daily_wage: newWage } : l))
+      );
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update wage';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Delete / Clear single attendance record
+  const deleteAttendanceRecord = async (laborerId: string, date: string) => {
+    try {
+      const { error } = await supabase
+        .from('attendance')
+        .delete()
+        .eq('laborer_id', laborerId)
+        .eq('attendance_date', date);
+
+      if (error) throw error;
+
+      setAttendanceMap((prev) => {
+        const next = { ...prev };
+        delete next[laborerId];
+        return next;
+      });
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to remove attendance record';
       return { success: false, error: msg };
     }
   };
@@ -333,6 +473,11 @@ export const SiteProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshData,
         syncNow,
         createNewSite,
+        updateSite,
+        deleteSite,
+        deleteLaborer,
+        updateLaborerWage,
+        deleteAttendanceRecord,
       }}
     >
       {children}

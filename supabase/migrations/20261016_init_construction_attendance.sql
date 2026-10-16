@@ -282,6 +282,14 @@ BEGIN
         RETURN TRUE;
     END IF;
 
+    -- Creator has direct access to the site
+    IF EXISTS (
+        SELECT 1 FROM public.construction_sites
+        WHERE id = check_site_id AND created_by = check_user_id
+    ) THEN
+        RETURN TRUE;
+    END IF;
+
     -- Otherwise check site_members
     RETURN EXISTS (
         SELECT 1 FROM public.site_members
@@ -327,33 +335,58 @@ CREATE POLICY "Authenticated users can insert profile"
     TO authenticated
     WITH CHECK (id = auth.uid() OR public.is_admin(auth.uid()));
 
+-- Ensure created_by column exists on construction_sites
+ALTER TABLE public.construction_sites ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id) DEFAULT auth.uid();
+
+-- Automated Trigger to assign site creator into site_members
+CREATE OR REPLACE FUNCTION public.handle_new_site_creator()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF auth.uid() IS NOT NULL THEN
+        INSERT INTO public.site_members (site_id, user_id, role)
+        VALUES (NEW.id, auth.uid(), 'admin')
+        ON CONFLICT (site_id, user_id) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_site_creator ON public.construction_sites;
+CREATE TRIGGER trg_site_creator
+    AFTER INSERT ON public.construction_sites
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_site_creator();
+
 -- --------------------------------------------------------------------
 -- RLS Policies: CONSTRUCTION_SITES
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view sites they are assigned to or all if admin" ON public.construction_sites;
-CREATE POLICY "Users can view sites they are assigned to or all if admin"
+DROP POLICY IF EXISTS "Users can view assigned or created sites" ON public.construction_sites;
+CREATE POLICY "Users can view assigned or created sites"
     ON public.construction_sites FOR SELECT
     TO authenticated
-    USING (public.has_site_access(id, auth.uid()));
+    USING (created_by = auth.uid() OR public.has_site_access(id, auth.uid()));
 
 DROP POLICY IF EXISTS "Admins can create construction sites" ON public.construction_sites;
-CREATE POLICY "Admins can create construction sites"
+DROP POLICY IF EXISTS "Authenticated users can create construction sites" ON public.construction_sites;
+CREATE POLICY "Authenticated users can create construction sites"
     ON public.construction_sites FOR INSERT
     TO authenticated
-    WITH CHECK (public.is_admin(auth.uid()));
+    WITH CHECK (auth.uid() IS NOT NULL);
 
 DROP POLICY IF EXISTS "Admins can update construction sites" ON public.construction_sites;
-CREATE POLICY "Admins can update construction sites"
+DROP POLICY IF EXISTS "Users can update their construction sites" ON public.construction_sites;
+CREATE POLICY "Users can update their construction sites"
     ON public.construction_sites FOR UPDATE
     TO authenticated
-    USING (public.is_admin(auth.uid()))
-    WITH CHECK (public.is_admin(auth.uid()));
+    USING (created_by = auth.uid() OR public.has_site_access(id, auth.uid()))
+    WITH CHECK (created_by = auth.uid() OR public.has_site_access(id, auth.uid()));
 
 DROP POLICY IF EXISTS "Admins can delete construction sites" ON public.construction_sites;
-CREATE POLICY "Admins can delete construction sites"
+DROP POLICY IF EXISTS "Users can delete their construction sites" ON public.construction_sites;
+CREATE POLICY "Users can delete their construction sites"
     ON public.construction_sites FOR DELETE
     TO authenticated
-    USING (public.is_admin(auth.uid()));
+    USING (created_by = auth.uid() OR public.has_site_access(id, auth.uid()));
 
 -- --------------------------------------------------------------------
 -- RLS Policies: SITE_MEMBERS
@@ -362,16 +395,17 @@ DROP POLICY IF EXISTS "Members can view assignments for their sites" ON public.s
 CREATE POLICY "Members can view assignments for their sites"
     ON public.site_members FOR SELECT
     TO authenticated
-    USING (user_id = auth.uid() OR public.is_admin(auth.uid()));
+    USING (user_id = auth.uid() OR public.has_site_access(site_id, auth.uid()));
 
 DROP POLICY IF EXISTS "Admins can manage site members" ON public.site_members;
-CREATE POLICY "Admins can manage site members"
+DROP POLICY IF EXISTS "Users can manage members of assigned sites" ON public.site_members;
+CREATE POLICY "Users can manage members of assigned sites"
     ON public.site_members FOR ALL
     TO authenticated
-    USING (public.is_admin(auth.uid()));
+    USING (user_id = auth.uid() OR public.has_site_access(site_id, auth.uid()));
 
 -- --------------------------------------------------------------------
--- RLS Policies: LABORERS
+-- RLS Policies: LABORERS (Full CRUD: View, Insert, Update, Delete)
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view laborers of assigned sites" ON public.laborers;
 CREATE POLICY "Users can view laborers of assigned sites"
@@ -392,8 +426,14 @@ CREATE POLICY "Supervisors and admins can update laborers in assigned sites"
     USING (public.has_site_access(site_id, auth.uid()))
     WITH CHECK (public.has_site_access(site_id, auth.uid()));
 
+DROP POLICY IF EXISTS "Supervisors and admins can delete laborers in assigned sites" ON public.laborers;
+CREATE POLICY "Supervisors and admins can delete laborers in assigned sites"
+    ON public.laborers FOR DELETE
+    TO authenticated
+    USING (public.has_site_access(site_id, auth.uid()));
+
 -- --------------------------------------------------------------------
--- RLS Policies: ATTENDANCE
+-- RLS Policies: ATTENDANCE (Full CRUD: View, Insert, Update, Delete)
 -- --------------------------------------------------------------------
 DROP POLICY IF EXISTS "Users can view attendance of assigned sites" ON public.attendance;
 CREATE POLICY "Users can view attendance of assigned sites"
@@ -413,6 +453,12 @@ CREATE POLICY "Supervisors and admins can update attendance in assigned sites"
     TO authenticated
     USING (public.has_site_access(site_id, auth.uid()))
     WITH CHECK (public.has_site_access(site_id, auth.uid()));
+
+DROP POLICY IF EXISTS "Supervisors and admins can delete attendance in assigned sites" ON public.attendance;
+CREATE POLICY "Supervisors and admins can delete attendance in assigned sites"
+    ON public.attendance FOR DELETE
+    TO authenticated
+    USING (public.has_site_access(site_id, auth.uid()));
 
 -- --------------------------------------------------------------------
 -- RLS Policies: ATTENDANCE_AUDIT_LOGS

@@ -6,28 +6,29 @@ import {
   CheckCircle2,
   Users,
   Search,
-  Filter,
-  RefreshCw,
   RotateCcw,
-  AlertCircle,
+  RefreshCw,
   Save,
-  MessageSquare,
+  Building2,
+  UserPlus,
 } from 'lucide-react';
 import { useSite } from '../../contexts/SiteContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Laborer, AttendanceStatus, LABOR_CATEGORIES, LaborCategory } from '../../types';
+import { Laborer, AttendanceStatus, LABOR_CATEGORIES } from '../../types';
 import { LaborerAttendanceCard } from './LaborerAttendanceCard';
 import { AttendanceAuditModal } from './AttendanceAuditModal';
+import { LaborerFormModal } from '../laborers/LaborerFormModal';
 import { Modal } from '../common/Modal';
 import { supabase } from '../../lib/supabase';
 import { enqueueAttendance } from '../../lib/offlineSync';
-import { calculateWageForStatus, formatDate, getTodayDateString } from '../../lib/wageCalculator';
+import { calculateWageForStatus, formatDate, getTodayDateString, formatCurrency } from '../../lib/wageCalculator';
 
 interface AttendanceTabProps {
   onShowToast: (type: 'success' | 'warning' | 'error' | 'info', title: string, description?: string) => void;
+  onOpenSiteManagement?: () => void;
 }
 
-export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => {
+export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast, onOpenSiteManagement }) => {
   const {
     currentSite,
     laborers,
@@ -35,14 +36,15 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
     selectedDate,
     setSelectedDate,
     refreshData,
+    deleteAttendanceRecord,
     isOnline,
   } = useSite();
   const { user } = useAuth();
 
-  // Local draft state for attendance statuses and notes before save
-  // Key: laborer_id -> status
+  // Local draft state for attendance statuses, notes, and custom daily wages before save
   const [draftStatuses, setDraftStatuses] = useState<Record<string, AttendanceStatus>>({});
   const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
+  const [draftWages, setDraftWages] = useState<Record<string, number>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
@@ -55,16 +57,20 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
   const [auditLaborer, setAuditLaborer] = useState<Laborer | null>(null);
   const [notesLaborer, setNotesLaborer] = useState<Laborer | null>(null);
   const [activeNoteText, setActiveNoteText] = useState('');
+  const [editingLaborer, setEditingLaborer] = useState<Laborer | null>(null);
+  const [isAddLaborerOpen, setIsAddLaborerOpen] = useState(false);
 
   // Synchronize draft state when attendanceMap or selectedDate changes
   React.useEffect(() => {
     const initialStatuses: Record<string, AttendanceStatus> = {};
     const initialNotes: Record<string, string> = {};
+    const initialWages: Record<string, number> = {};
 
     laborers.forEach((lab) => {
       const existing = attendanceMap[lab.id];
       if (existing) {
         initialStatuses[lab.id] = existing.status;
+        initialWages[lab.id] = Number(existing.wage_amount) || calculateWageForStatus(lab.daily_wage, existing.status);
         if (existing.notes) {
           initialNotes[lab.id] = existing.notes;
         }
@@ -73,6 +79,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
 
     setDraftStatuses(initialStatuses);
     setDraftNotes(initialNotes);
+    setDraftWages(initialWages);
     setHasUnsavedChanges(false);
   }, [attendanceMap, selectedDate, laborers]);
 
@@ -87,6 +94,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
   };
 
   const handleStatusChange = (laborerId: string, status: AttendanceStatus) => {
+    const lab = laborers.find((l) => l.id === laborerId);
     setDraftStatuses((prev) => {
       // Toggle off if tapping same status
       if (prev[laborerId] === status) {
@@ -96,19 +104,70 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
       }
       return { ...prev, [laborerId]: status };
     });
+
+    // Reset wage to default for newly selected status
+    if (lab) {
+      setDraftWages((prev) => ({
+        ...prev,
+        [laborerId]: calculateWageForStatus(lab.daily_wage, status),
+      }));
+    }
+
     setHasUnsavedChanges(true);
+  };
+
+  const handleClearAttendance = async (laborerId: string) => {
+    setDraftStatuses((prev) => {
+      const next = { ...prev };
+      delete next[laborerId];
+      return next;
+    });
+    setDraftWages((prev) => {
+      const next = { ...prev };
+      delete next[laborerId];
+      return next;
+    });
+    setDraftNotes((prev) => {
+      const next = { ...prev };
+      delete next[laborerId];
+      return next;
+    });
+
+    // If already in database, delete immediately from Supabase
+    if (attendanceMap[laborerId]) {
+      const res = await deleteAttendanceRecord(laborerId, selectedDate);
+      if (res.success) {
+        onShowToast('info', 'Attendance Cleared', 'Attendance record removed for this date.');
+        await refreshData();
+      } else {
+        onShowToast('error', 'Failed to clear', res.error);
+      }
+    } else {
+      setHasUnsavedChanges(true);
+    }
+  };
+
+  const handleWageOverride = (laborerId: string, newWage: number) => {
+    setDraftWages((prev) => ({
+      ...prev,
+      [laborerId]: newWage,
+    }));
+    setHasUnsavedChanges(true);
+    onShowToast('info', 'Daily wage adjusted', `Wage overridden to ${formatCurrency(newWage)} for this day.`);
   };
 
   // Quick Action: Mark All Present
   const handleMarkAllPresent = () => {
     const updated = { ...draftStatuses };
+    const updatedWages = { ...draftWages };
     laborers.forEach((lab) => {
-      // If not already marked, mark as present
       if (!updated[lab.id]) {
         updated[lab.id] = 'present';
+        updatedWages[lab.id] = calculateWageForStatus(lab.daily_wage, 'present');
       }
     });
     setDraftStatuses(updated);
+    setDraftWages(updatedWages);
     setHasUnsavedChanges(true);
     onShowToast('info', 'All unmarked laborers marked Present', 'Tap "Save Attendance" below to commit.');
   };
@@ -117,13 +176,16 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
   const handleResetDrafts = () => {
     if (confirm('Discard unsaved attendance changes for this date?')) {
       const initialStatuses: Record<string, AttendanceStatus> = {};
+      const initialWages: Record<string, number> = {};
       laborers.forEach((lab) => {
         const existing = attendanceMap[lab.id];
         if (existing) {
           initialStatuses[lab.id] = existing.status;
+          initialWages[lab.id] = Number(existing.wage_amount) || calculateWageForStatus(lab.daily_wage, existing.status);
         }
       });
       setDraftStatuses(initialStatuses);
+      setDraftWages(initialWages);
       setHasUnsavedChanges(false);
     }
   };
@@ -135,16 +197,17 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
     setIsSaving(true);
 
     try {
-      // Build array of records to upsert
       const recordsToSave = Object.entries(draftStatuses).map(([laborerId, status]) => {
         const laborer = laborers.find((l) => l.id === laborerId);
-        const wage = laborer ? calculateWageForStatus(laborer.daily_wage, status) : 0;
+        const defaultWage = laborer ? calculateWageForStatus(laborer.daily_wage, status) : 0;
+        const finalWage = draftWages[laborerId] !== undefined ? draftWages[laborerId] : defaultWage;
+
         return {
           site_id: currentSite.id,
           laborer_id: laborerId,
           attendance_date: selectedDate,
           status,
-          wage_amount: wage,
+          wage_amount: finalWage,
           notes: draftNotes[laborerId] || '',
           recorded_by: user?.id,
         };
@@ -157,7 +220,6 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
       }
 
       if (!isOnline) {
-        // Enqueue offline
         enqueueAttendance(recordsToSave);
         setIsSaving(false);
         setHasUnsavedChanges(false);
@@ -170,7 +232,6 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
         return;
       }
 
-      // Online: Upsert to Supabase
       const { error } = await supabase
         .from('attendance')
         .upsert(recordsToSave, {
@@ -188,16 +249,17 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
     } catch (err: unknown) {
       setIsSaving(false);
       console.warn('Network or DB error saving attendance, falling back to local queue:', err);
-      // Fallback: save to offline queue so work is never lost!
       const fallbackRecords = Object.entries(draftStatuses).map(([laborerId, status]) => {
         const laborer = laborers.find((l) => l.id === laborerId);
-        const wage = laborer ? calculateWageForStatus(laborer.daily_wage, status) : 0;
+        const defaultWage = laborer ? calculateWageForStatus(laborer.daily_wage, status) : 0;
+        const finalWage = draftWages[laborerId] !== undefined ? draftWages[laborerId] : defaultWage;
+
         return {
           site_id: currentSite.id,
           laborer_id: laborerId,
           attendance_date: selectedDate,
           status,
-          wage_amount: wage,
+          wage_amount: finalWage,
           notes: draftNotes[laborerId] || '',
           recorded_by: user?.id,
         };
@@ -216,18 +278,15 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
   // Filtered Laborers List
   const filteredLaborers = useMemo(() => {
     return laborers.filter((l) => {
-      // Search
       const matchesSearch =
         l.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (l.phone && l.phone.includes(searchQuery));
       if (!matchesSearch) return false;
 
-      // Category filter
       if (selectedCategory !== 'all' && l.category !== selectedCategory) {
         return false;
       }
 
-      // Unmarked only filter
       if (filterUnmarkedOnly) {
         return !draftStatuses[l.id];
       }
@@ -238,6 +297,18 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
 
   const markedCount = Object.keys(draftStatuses).length;
   const unmarkedCount = Math.max(0, laborers.length - markedCount);
+
+  // Total payable wages today
+  const totalDayCost = useMemo(() => {
+    return Object.entries(draftStatuses).reduce((sum, [labId, status]) => {
+      const lab = laborers.find((l) => l.id === labId);
+      if (!lab) return sum;
+      const wage = draftWages[labId] !== undefined
+        ? draftWages[labId]
+        : calculateWageForStatus(lab.daily_wage, status);
+      return sum + wage;
+    }, 0);
+  }, [draftStatuses, draftWages, laborers]);
 
   // Note Modal Handlers
   const handleOpenNotes = (laborer: Laborer) => {
@@ -255,6 +326,62 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
     }
     setNotesLaborer(null);
   };
+
+  // If no site is selected
+  if (!currentSite) {
+    return (
+      <div className="space-y-4 pb-20 pt-6 text-center">
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-xs max-w-md mx-auto">
+          <Building2 className="w-12 h-12 mx-auto text-amber-500 mb-3" />
+          <h3 className="font-bold text-slate-900 text-base mb-1">No Construction Site Selected</h3>
+          <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+            Create or select a construction site to start recording and managing daily labor attendance.
+          </p>
+          {onOpenSiteManagement && (
+            <button
+              type="button"
+              onClick={onOpenSiteManagement}
+              className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-colors shadow-xs"
+            >
+              + Create or Select Site
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // If site has no laborers added
+  if (laborers.length === 0) {
+    return (
+      <div className="space-y-4 pb-20 pt-6 text-center">
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-xs max-w-md mx-auto">
+          <Users className="w-12 h-12 mx-auto text-amber-500 mb-3" />
+          <h3 className="font-bold text-slate-900 text-base mb-1">No Laborers on {currentSite.name}</h3>
+          <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+            Add your workers (Masons, Helpers, Carpenters, etc.) and their daily wages to begin marking attendance.
+          </p>
+          <button
+            type="button"
+            onClick={() => setIsAddLaborerOpen(true)}
+            className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-colors shadow-xs flex items-center justify-center gap-2"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>+ Add First Laborer</span>
+          </button>
+        </div>
+
+        <LaborerFormModal
+          isOpen={isAddLaborerOpen}
+          onClose={() => setIsAddLaborerOpen(false)}
+          onSaved={async () => {
+            await refreshData();
+            onShowToast('success', 'Laborer Added');
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3 pb-32 pt-2">
@@ -413,6 +540,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
         {filteredLaborers.map((laborer) => {
           const currentStatus = draftStatuses[laborer.id];
           const currentNote = draftNotes[laborer.id];
+          const currentWage = draftWages[laborer.id];
           const isSavedInDb = Boolean(attendanceMap[laborer.id]);
 
           return (
@@ -421,9 +549,13 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
               laborer={laborer}
               status={currentStatus}
               notes={currentNote}
+              wageAmount={currentWage}
               isSavedInDb={isSavedInDb}
               hasAuditLogs={isSavedInDb}
               onStatusChange={(status) => handleStatusChange(laborer.id, status)}
+              onClearAttendance={() => handleClearAttendance(laborer.id)}
+              onWageOverride={(newWage) => handleWageOverride(laborer.id, newWage)}
+              onEditLaborer={() => setEditingLaborer(laborer)}
               onOpenNotes={() => handleOpenNotes(laborer)}
               onOpenAudit={() => setAuditLaborer(laborer)}
             />
@@ -447,10 +579,10 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
           <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-bold text-slate-900 leading-tight">
-                {markedCount} of {laborers.length} laborers marked
+                {markedCount} of {laborers.length} marked &bull; {formatCurrency(totalDayCost)}
               </p>
               <p className="text-[11px] text-slate-500">
-                {hasUnsavedChanges ? '⚠️ Unsaved changes' : 'All marks saved'}
+                {hasUnsavedChanges ? '⚠️ Unsaved changes' : 'All marks saved in cloud'}
               </p>
             </div>
 
@@ -523,6 +655,24 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({ onShowToast }) => 
         onClose={() => setAuditLaborer(null)}
         laborer={auditLaborer}
         attendanceDate={selectedDate}
+      />
+
+      {/* Edit / Add Laborer Modal right from Attendance */}
+      <LaborerFormModal
+        isOpen={Boolean(editingLaborer) || isAddLaborerOpen}
+        onClose={() => {
+          setEditingLaborer(null);
+          setIsAddLaborerOpen(false);
+        }}
+        laborerToEdit={editingLaborer}
+        onSaved={async () => {
+          await refreshData();
+          onShowToast('success', editingLaborer ? 'Laborer Updated' : 'Laborer Added');
+        }}
+        onDeleted={async () => {
+          await refreshData();
+          onShowToast('info', 'Laborer Deleted');
+        }}
       />
     </div>
   );

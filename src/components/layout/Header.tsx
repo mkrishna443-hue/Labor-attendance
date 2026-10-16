@@ -124,22 +124,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSiteManagement }) => {
             <div className="text-center py-6 text-slate-500 text-sm">
               <Building2 className="w-8 h-8 mx-auto text-slate-300 mb-2" />
               <p>No construction sites available.</p>
-              {isAdmin && <p className="text-xs text-slate-400 mt-1">Create your first site below.</p>}
+              <p className="text-xs text-slate-400 mt-1">Create your first site below.</p>
             </div>
           )}
 
-          {isAdmin && (
-            <button
-              onClick={() => {
-                setIsSitePickerOpen(false);
-                onOpenSiteManagement();
-              }}
-              className="w-full mt-3 py-2.5 px-4 rounded-xl border border-dashed border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create / Manage Construction Sites</span>
-            </button>
-          )}
+          <button
+            onClick={() => {
+              setIsSitePickerOpen(false);
+              onOpenSiteManagement();
+            }}
+            className="w-full mt-3 py-2.5 px-4 rounded-xl border border-dashed border-slate-300 hover:border-slate-400 text-slate-700 hover:text-slate-900 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create / Manage Construction Sites</span>
+          </button>
         </div>
       </Modal>
 
@@ -184,18 +182,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSiteManagement }) => {
             </div>
           </div>
 
-          {isAdmin && (
-            <button
-              onClick={() => {
-                setIsProfileModalOpen(false);
-                onOpenSiteManagement();
-              }}
-              className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors"
-            >
-              <Building2 className="w-4 h-4 text-slate-700" />
-              <span>Admin Site Management</span>
-            </button>
-          )}
+          <button
+            onClick={() => {
+              setIsProfileModalOpen(false);
+              onOpenSiteManagement();
+            }}
+            className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors"
+          >
+            <Building2 className="w-4 h-4 text-slate-700" />
+            <span>Manage Construction Sites</span>
+          </button>
 
           <button
             onClick={() => {

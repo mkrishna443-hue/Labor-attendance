@@ -7,7 +7,7 @@ A fast, mobile-first **Construction Site Labor Attendance & Wage Tracking Applic
 ## 🏗️ Core Features
 
 - **📱 Mobile-First Experience**: High-contrast, tactile UI optimized for smartphones used at dusty construction sites with large 48px+ touch targets and zero gradients (clean navy blue, white, and slate color palette).
-- **📲 Phone Number OTP Authentication**: Passwordless login using mobile number (+91) with 6-digit OTP verification, cooldown countdown, and secure cross-session persistence via Supabase Auth.
+- **✉️ Simple Email Authentication**: Free, zero-SMS login using Email + Password or Email Verification Code with secure cross-session persistence via Supabase Auth.
 - **⚡ Fast Daily Attendance**:
   - One-tap status marking: **Present (Full Day)**, **Half Day (0.5 Wage)**, **Absent (0 Wage)**, and **Leave**.
   - **"Mark All Present"** bulk shortcut to record dozens of workers in seconds.

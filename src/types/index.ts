@@ -30,7 +30,8 @@ export const LABOR_CATEGORIES: LaborCategory[] = [
 export interface Profile {
   id: string;
   name: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   role: UserRole;
   created_at?: string;
   updated_at?: string;

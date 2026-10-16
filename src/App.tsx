@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SiteProvider } from './contexts/SiteContext';
-import { PhoneLogin } from './components/auth/PhoneLogin';
+import { EmailLogin } from './components/auth/EmailLogin';
 import { Header } from './components/layout/Header';
 import { BottomNav, TabType } from './components/layout/BottomNav';
 import { OfflineBanner } from './components/layout/OfflineBanner';
@@ -52,7 +52,7 @@ const MainApp: React.FC = () => {
   }
 
   if (!user) {
-    return <PhoneLogin />;
+    return <EmailLogin />;
   }
 
   return (

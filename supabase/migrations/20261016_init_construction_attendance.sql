@@ -9,13 +9,20 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     name TEXT NOT NULL DEFAULT '',
-    phone TEXT NOT NULL UNIQUE,
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
     role TEXT NOT NULL CHECK (role IN ('admin', 'supervisor')) DEFAULT 'supervisor',
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Index for phone queries
+-- Ensure email column exists and phone constraints are relaxed for existing tables
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';
+ALTER TABLE public.profiles ALTER COLUMN phone DROP NOT NULL;
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_phone_key;
+
+-- Indexes for email and phone queries
+CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
 CREATE INDEX IF NOT EXISTS idx_profiles_phone ON public.profiles(phone);
 
 -- 3. Construction Sites Table

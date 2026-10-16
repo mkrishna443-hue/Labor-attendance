@@ -157,7 +157,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSiteManagement }) => {
             </div>
             <div className="min-w-0">
               <h4 className="font-bold text-slate-900 text-base">{profile?.name || 'Site Supervisor'}</h4>
-              <p className="text-xs text-slate-500">{user?.phone || profile?.phone || 'No phone'}</p>
+              <p className="text-xs text-slate-500">{user?.email || profile?.email || user?.phone || 'Supervisor'}</p>
               <div className="mt-1 flex items-center gap-1.5">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-200 text-slate-800">
                   <Shield className="w-3 h-3 text-slate-600" />

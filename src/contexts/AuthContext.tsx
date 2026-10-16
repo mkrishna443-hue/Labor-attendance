@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { User, Session, AuthError } from '@supabase/supabase-js';
+import { User, Session } from '@supabase/supabase-js';
 import { supabase, getSupabaseCredentials } from '../lib/supabase';
 import { Profile } from '../types';
 
@@ -11,8 +11,10 @@ interface AuthContextType {
   isSupervisor: boolean;
   isLoading: boolean;
   isConfigured: boolean;
-  sendOtp: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>;
-  verifyOtp: (phoneNumber: string, otpCode: string) => Promise<{ success: boolean; error?: string }>;
+  signInWithPassword: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signUpWithPassword: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
+  sendEmailOtp: (email: string) => Promise<{ success: boolean; error?: string }>;
+  verifyEmailOtp: (email: string, token: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   checkConfiguration: () => void;
@@ -32,7 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsConfigured(creds.isConfigured);
   }, []);
 
-  const fetchProfile = useCallback(async (userId: string, userPhone?: string): Promise<Profile | null> => {
+  const fetchProfile = useCallback(async (userId: string, userEmail?: string): Promise<Profile | null> => {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -50,10 +52,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // If user profile record not created yet, upsert one
+      const derivedName = userEmail ? userEmail.split('@')[0] : 'Site Supervisor';
       const newProfile: Partial<Profile> = {
         id: userId,
-        phone: userPhone || '',
-        name: 'Site Supervisor',
+        email: userEmail || '',
+        name: derivedName,
         role: 'supervisor',
       };
 
@@ -68,8 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Fallback local representation
         const fallback: Profile = {
           id: userId,
-          phone: userPhone || '',
-          name: 'Site Supervisor',
+          email: userEmail || '',
+          name: derivedName,
           role: 'supervisor',
         };
         setProfile(fallback);
@@ -92,7 +95,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
       if (currentSession?.user) {
-        fetchProfile(currentSession.user.id, currentSession.user.phone).finally(() => {
+        fetchProfile(currentSession.user.id, currentSession.user.email).finally(() => {
           setIsLoading(false);
         });
       } else {
@@ -103,13 +106,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(false);
     });
 
-    // Listen for auth state changes (sign in, sign out, token refresh)
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
         setSession(newSession);
         setUser(newSession?.user ?? null);
         if (newSession?.user) {
-          await fetchProfile(newSession.user.id, newSession.user.phone);
+          await fetchProfile(newSession.user.id, newSession.user.email);
         } else {
           setProfile(null);
         }
@@ -122,32 +125,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [checkConfiguration, fetchProfile]);
 
-  const sendOtp = async (phoneNumber: string): Promise<{ success: boolean; error?: string }> => {
+  // Sign In with Email & Password
+  const signInWithPassword = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: phoneNumber,
-        options: {
-          channel: 'sms',
-        },
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      return { success: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to send OTP';
-      return { success: false, error: msg };
-    }
-  };
-
-  const verifyOtp = async (phoneNumber: string, otpCode: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: phoneNumber,
-        token: otpCode.trim(),
-        type: 'sms',
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
       });
 
       if (error) {
@@ -157,12 +140,97 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.user) {
         setUser(data.user);
         setSession(data.session);
-        await fetchProfile(data.user.id, data.user.phone);
+        await fetchProfile(data.user.id, data.user.email);
       }
 
       return { success: true };
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Invalid or expired OTP code';
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Sign Up with Email & Password
+  const signUpWithPassword = async (
+    email: string,
+    password: string,
+    name?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const displayName = name?.trim() || cleanEmail.split('@')[0];
+
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: {
+            name: displayName,
+            role: 'supervisor',
+          },
+        },
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data.user) {
+        setUser(data.user);
+        setSession(data.session);
+        await fetchProfile(data.user.id, cleanEmail);
+      }
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Send Email OTP / Magic Code
+  const sendEmailOtp = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: {
+          shouldCreateUser: true,
+        },
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to send verification code';
+      return { success: false, error: msg };
+    }
+  };
+
+  // Verify Email OTP
+  const verifyEmailOtp = async (email: string, token: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: token.trim(),
+        type: 'email',
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data.user) {
+        setUser(data.user);
+        setSession(data.session);
+        await fetchProfile(data.user.id, data.user.email);
+      }
+
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid or expired code';
       return { success: false, error: msg };
     }
   };
@@ -180,7 +248,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshProfile = async (): Promise<void> => {
     if (user) {
-      await fetchProfile(user.id, user.phone);
+      await fetchProfile(user.id, user.email);
     }
   };
 
@@ -197,8 +265,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isSupervisor,
         isLoading,
         isConfigured,
-        sendOtp,
-        verifyOtp,
+        signInWithPassword,
+        signUpWithPassword,
+        sendEmailOtp,
+        verifyEmailOtp,
         signOut,
         refreshProfile,
         checkConfiguration,
